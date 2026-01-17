@@ -30,6 +30,7 @@ func main() {
 		log.Fatalf("postgres connect error: %v", err)
 	}
 	defer pg.Close()
+	repo := storage.NewBlockchainRepo(pg)
 
 	redisQ, err := queue.NewRedisStreams(cfg.Redis)
 	if err != nil {
@@ -42,7 +43,7 @@ func main() {
 	svc := indexer.New(indexer.Deps{
 		Cfg:   cfg,
 		RPC:   rpc,
-		Store: pg,
+		Store: repo,
 		Queue: redisQ,
 	})
 
@@ -52,4 +53,3 @@ func main() {
 		os.Exit(1)
 	}
 }
-

@@ -17,14 +17,14 @@ import (
 type Deps struct {
 	Cfg   config.Config
 	RPC   *ethrpc.HTTPClient
-	Store *storage.Postgres
+	Store *storage.BlockchainRepo
 	Queue *queue.RedisStreams
 }
 
 type Service struct {
 	cfg   config.Config
 	rpc   *ethrpc.HTTPClient
-	store *storage.Postgres
+	store *storage.BlockchainRepo
 	queue *queue.RedisStreams
 }
 
@@ -333,4 +333,3 @@ func (s *Service) findCommonAncestorAndChain(ctx context.Context, oldHead storag
 
 	return 0, "", nil, fmt.Errorf("reorg depth exceeded; could not find common ancestor (maxDepth=%d)", maxDepth)
 }
-
