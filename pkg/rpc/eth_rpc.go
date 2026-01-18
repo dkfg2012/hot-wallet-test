@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hot-wallet-test/pkg/util"
 	"time"
 )
 
@@ -17,6 +18,14 @@ var _ RPC = (*EthRPC)(nil)
 
 func NewEthRPC(url string, timeout time.Duration) *EthRPC {
 	return &EthRPC{url: url, timeout: timeout, hc: NewHTTP(url, timeout)}
+}
+
+func (c *EthRPC) BlockNumber(ctx context.Context) (uint64, error) {
+	var resp string
+	if err := c.hc.Call(ctx, "eth_blockNumber", []interface{}{}, &resp); err != nil {
+		return 0, err
+	}
+	return util.ParseHexUint64(resp)
 }
 
 func (c *EthRPC) GetBlockByNumber(ctx context.Context, number uint64, fullTx bool) (RawBlock, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hot-wallet-test/pkg/util"
 	"time"
 )
 
@@ -15,12 +16,20 @@ type PolPRC struct {
 
 var _ RPC = (*PolPRC)(nil)
 
-func NewPolPRC(url string, timeout time.Duration, hc *HTTPClient) *PolPRC {
+func NewPolPRC(url string, timeout time.Duration) *PolPRC {
 	return &PolPRC{
 		url:     url,
 		timeout: timeout,
 		hc:      NewHTTP(url, timeout),
 	}
+}
+
+func (c *PolPRC) BlockNumber(ctx context.Context) (uint64, error) {
+	var resp string
+	if err := c.hc.Call(ctx, "eth_blockNumber", []interface{}{}, &resp); err != nil {
+		return 0, err
+	}
+	return util.ParseHexUint64(resp)
 }
 
 func (c *PolPRC) GetBlockByNumber(ctx context.Context, number uint64, fullTx bool) (RawBlock, error) {

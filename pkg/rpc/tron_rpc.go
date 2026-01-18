@@ -11,6 +11,10 @@ type TronRPC struct {
 	hc      *HTTPClient
 }
 
+func (t TronRPC) BlockNumber(ctx context.Context) (uint64, error) {
+	panic("implement me")
+}
+
 func (t TronRPC) GetBlockByNumber(ctx context.Context, number uint64, fullTx bool) (RawBlock, error) {
 	//TODO implement me
 	panic("implement me")

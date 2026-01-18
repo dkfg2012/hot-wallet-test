@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"hot-wallet-test/pkg/rpc"
+	"hot-wallet-test/pkg/websocket"
 	"log"
 	"os"
 	"os/signal"
@@ -37,13 +39,24 @@ func main() {
 	}
 	defer redisQ.Close()
 
-	//rpc := ethrpc.NewHTTP(cfg.EthRPC.HTTPURL, cfg.EthRPC.Timeout)
+	ethWs := websocket.NewEthWebsocketClient(cfg.EthRPC.WSURL)
+	polWs := websocket.NewPoLWebsocketClient(cfg.PolRPC.WSURL)
+
+	var wss []websocket.WebsocketClient
+	wss = append(wss, ethWs, polWs)
+
+	ethRPC := rpc.NewEthRPC(cfg.EthRPC.HTTPURL, cfg.EthRPC.Timeout)
+	polRPC := rpc.NewPolPRC(cfg.PolRPC.HTTPURL, cfg.PolRPC.Timeout)
+	btcRPC := rpc.NewBTCRPC(cfg.BtcRPC.HTTPURL, cfg.BtcRPC.Timeout)
+	var rpcs []rpc.RPC
+	rpcs = append(rpcs, ethRPC, polRPC, btcRPC)
 
 	svc := indexer.New(indexer.Deps{
 		Cfg:   cfg,
-		RPC:   nil,
 		Store: repo,
 		Queue: redisQ,
+		WS:    wss,
+		RPC:   rpcs,
 	})
 
 	if err := svc.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {

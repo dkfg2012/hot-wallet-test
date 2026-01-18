@@ -26,6 +26,24 @@ type EthRPCConfig struct {
 	Timeout time.Duration
 }
 
+type PolRPCConfig struct {
+	HTTPURL string
+	WSURL   string
+	Timeout time.Duration
+}
+
+type BtcRPCConfig struct {
+	HTTPURL string
+	WSURL   string
+	Timeout time.Duration
+}
+
+type TronRPCConfig struct {
+	HTTPURL string
+	WSURL   string
+	Timeout time.Duration
+}
+
 type SyncConfig struct {
 	StartBlock    uint64
 	BatchSize     int
@@ -37,6 +55,9 @@ type Config struct {
 	PostgresDSN string
 	Redis       RedisConfig
 	EthRPC      EthRPCConfig
+	PolRPC      PolRPCConfig
+	BtcRPC      BtcRPCConfig
+	TronRPC     TronRPCConfig
 	Sync        SyncConfig
 }
 
@@ -50,14 +71,51 @@ func FromEnv() (Config, error) {
 	}
 
 	c.EthRPC.HTTPURL = os.Getenv("ETH_RPC_HTTP_URL")
-	if c.EthRPC.HTTPURL == "" {
-		return Config{}, errors.New("missing ETH_RPC_HTTP_URL")
-	}
 	c.EthRPC.WSURL = os.Getenv("ETH_RPC_WS_URL")
-	if c.EthRPC.WSURL == "" {
-		return Config{}, errors.New("missing ETH_RPC_WS_URL")
-	}
 	c.EthRPC.Timeout = mustDuration(getenvDefault("ETH_RPC_TIMEOUT", "15s"))
+
+	c.PolRPC.HTTPURL = os.Getenv("POL_RPC_HTTP_URL")
+	c.PolRPC.WSURL = os.Getenv("POL_RPC_WS_URL")
+	c.PolRPC.Timeout = mustDuration(getenvDefault("POL_RPC_TIMEOUT", "15s"))
+
+	c.BtcRPC.HTTPURL = os.Getenv("BTC_RPC_HTTP_URL")
+	c.BtcRPC.WSURL = os.Getenv("BTC_RPC_WS_URL")
+	c.BtcRPC.Timeout = mustDuration(getenvDefault("BTC_RPC_TIMEOUT", "15s"))
+
+	c.TronRPC.HTTPURL = os.Getenv("TRON_RPC_HTTP_URL")
+	c.TronRPC.WSURL = os.Getenv("TRON_RPC_WS_URL")
+	c.TronRPC.Timeout = mustDuration(getenvDefault("TRON_RPC_TIMEOUT", "15s"))
+
+	// Validate required endpoints based on configured network.
+	switch c.Network {
+	case "sepolia", "eth", "ethereum":
+		if c.EthRPC.HTTPURL == "" {
+			return Config{}, errors.New("missing ETH_RPC_HTTP_URL")
+		}
+		if c.EthRPC.WSURL == "" {
+			return Config{}, errors.New("missing ETH_RPC_WS_URL")
+		}
+	case "amoy", "pol", "polygon":
+		if c.PolRPC.HTTPURL == "" {
+			return Config{}, errors.New("missing POL_RPC_HTTP_URL")
+		}
+		if c.PolRPC.WSURL == "" {
+			return Config{}, errors.New("missing POL_RPC_WS_URL")
+		}
+	case "btc", "bitcoin":
+		if c.BtcRPC.HTTPURL == "" {
+			return Config{}, errors.New("missing BTC_RPC_HTTP_URL")
+		}
+	case "tron":
+		if c.TronRPC.HTTPURL == "" {
+			return Config{}, errors.New("missing TRON_RPC_HTTP_URL")
+		}
+	default:
+		// Keep flexible: if user sets an unknown network, just ensure at least one RPC URL is present.
+		if c.EthRPC.HTTPURL == "" && c.PolRPC.HTTPURL == "" && c.BtcRPC.HTTPURL == "" && c.TronRPC.HTTPURL == "" {
+			return Config{}, errors.New("no RPC HTTP URL configured (ETH/POL/BTC/TRON)")
+		}
+	}
 
 	c.Redis.Addr = getenvDefault("REDIS_ADDR", "127.0.0.1:6379")
 	c.Redis.Password = os.Getenv("REDIS_PASSWORD")
@@ -105,4 +163,3 @@ func mustDuration(v string) time.Duration {
 	}
 	return d
 }
-

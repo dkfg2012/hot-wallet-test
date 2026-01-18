@@ -3,27 +3,31 @@ package indexer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"hot-wallet-test/pkg/rpc"
+	"hot-wallet-test/pkg/websocket"
 	"log"
+	"sync"
 	"time"
 
 	"hot-wallet-test/pkg/config"
-	"hot-wallet-test/pkg/ethrpc"
-	"hot-wallet-test/pkg/ethws"
 	"hot-wallet-test/pkg/queue"
 	"hot-wallet-test/pkg/storage"
 )
 
 type Deps struct {
 	Cfg   config.Config
-	RPC   *ethrpc.HTTPClient
+	RPC   []rpc.RPC
+	WS    []websocket.WebsocketClient
 	Store *storage.BlockchainRepo
 	Queue *queue.RedisStreams
 }
 
 type Service struct {
 	cfg   config.Config
-	rpc   *ethrpc.HTTPClient
+	rpcs  []rpc.RPC
+	ws    []websocket.WebsocketClient
 	store *storage.BlockchainRepo
 	queue *queue.RedisStreams
 }
@@ -31,13 +35,21 @@ type Service struct {
 func New(d Deps) *Service {
 	return &Service{
 		cfg:   d.Cfg,
-		rpc:   d.RPC,
+		rpcs:  d.RPC,
+		ws:    d.WS,
 		store: d.Store,
 		queue: d.Queue,
 	}
 }
 
 func (s *Service) Run(ctx context.Context) error {
+	if len(s.rpcs) == 0 {
+		return errors.New("no rpc clients configured")
+	}
+	if len(s.ws) == 0 {
+		return errors.New("no websocket clients configured")
+	}
+
 	if err := s.store.MustHaveMigrations(ctx); err != nil {
 		return err
 	}
@@ -48,8 +60,7 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 
 	// 2) Start head listener and keep up
-	ws := ethws.New(s.cfg.EthRPC.WSURL)
-	heads := ws.ListenNewHeads(ctx)
+	heads := s.listenHeads(ctx)
 
 	for {
 		select {
@@ -73,7 +84,7 @@ func (s *Service) chainSync(ctx context.Context) error {
 		start = s.cfg.Sync.StartBlock
 	}
 
-	latest, err := s.rpc.BlockNumber(ctx)
+	latest, err := s.rpcBlockNumber(ctx)
 	if err != nil {
 		return err
 	}
@@ -99,7 +110,7 @@ func (s *Service) chainSync(ctx context.Context) error {
 			nums = append(nums, n)
 		}
 
-		blocks, err := s.rpc.BatchGetBlocksByNumber(ctx, nums, true)
+		blocks, err := s.rpcBatchGetBlocksByNumber(ctx, nums, true)
 		if err != nil {
 			return err
 		}
@@ -116,7 +127,7 @@ func (s *Service) chainSync(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) onNewHead(ctx context.Context, h ethws.NewHead) error {
+func (s *Service) onNewHead(ctx context.Context, h websocket.NewHead) error {
 	// If we are behind by a lot (gap), do a quick sync first.
 	canon, _ := s.store.GetCanonicalHead(ctx)
 	if canon.Hash != "" && h.Number > canon.Number+1 {
@@ -128,7 +139,7 @@ func (s *Service) onNewHead(ctx context.Context, h ethws.NewHead) error {
 		}
 	}
 
-	b, err := s.rpc.GetBlockByHash(ctx, h.Hash, true)
+	b, err := s.rpcGetBlockByHash(ctx, h.Hash, true)
 	if err != nil {
 		return err
 	}
@@ -148,7 +159,7 @@ func (s *Service) syncRange(ctx context.Context, from, to uint64) error {
 		for n := cur; n <= end; n++ {
 			nums = append(nums, n)
 		}
-		blocks, err := s.rpc.BatchGetBlocksByNumber(ctx, nums, true)
+		blocks, err := s.rpcBatchGetBlocksByNumber(ctx, nums, true)
 		if err != nil {
 			return err
 		}
@@ -163,7 +174,7 @@ func (s *Service) syncRange(ctx context.Context, from, to uint64) error {
 }
 
 // processBlock writes into DB, handles reorg if needed, and emits to Redis stream.
-func (s *Service) processBlock(ctx context.Context, b ethrpc.RawBlock, source string, allowReorg bool) error {
+func (s *Service) processBlock(ctx context.Context, b rpc.RawBlock, source string, allowReorg bool) error {
 	canon, _ := s.store.GetCanonicalHead(ctx)
 
 	// Normal extension
@@ -219,7 +230,7 @@ func (s *Service) processBlock(ctx context.Context, b ethrpc.RawBlock, source st
 	})
 }
 
-func (s *Service) handleReorg(ctx context.Context, oldHead storage.CanonicalHead, newHead ethrpc.RawBlock, source string) error {
+func (s *Service) handleReorg(ctx context.Context, oldHead storage.CanonicalHead, newHead rpc.RawBlock, source string) error {
 	ancestorNum, ancestorHash, chain, err := s.findCommonAncestorAndChain(ctx, oldHead, newHead)
 	if err != nil {
 		return err
@@ -274,11 +285,11 @@ func (s *Service) handleReorg(ctx context.Context, oldHead storage.CanonicalHead
 // findCommonAncestorAndChain returns:
 // - ancestor block number/hash on current canonical chain
 // - the new canonical chain blocks from (ancestor+1) .. (newHead) in forward order
-func (s *Service) findCommonAncestorAndChain(ctx context.Context, oldHead storage.CanonicalHead, newHead ethrpc.RawBlock) (uint64, string, []ethrpc.RawBlock, error) {
+func (s *Service) findCommonAncestorAndChain(ctx context.Context, oldHead storage.CanonicalHead, newHead rpc.RawBlock) (uint64, string, []rpc.RawBlock, error) {
 	// Walk backwards from new head until we reach a canonical block hash at same height.
 	const maxDepth = 256
 
-	chainRev := make([]ethrpc.RawBlock, 0, 64)
+	chainRev := make([]rpc.RawBlock, 0, 64)
 	cur := newHead
 	for depth := 0; depth < maxDepth; depth++ {
 		if cur.Number == 0 {
@@ -304,7 +315,7 @@ func (s *Service) findCommonAncestorAndChain(ctx context.Context, oldHead storag
 			ancestorHash := parentCanon
 			chainRev = append(chainRev, cur)
 			// reverse to forward order
-			chain := make([]ethrpc.RawBlock, 0, len(chainRev))
+			chain := make([]rpc.RawBlock, 0, len(chainRev))
 			for i := len(chainRev) - 1; i >= 0; i-- {
 				chain = append(chain, chainRev[i])
 			}
@@ -314,7 +325,7 @@ func (s *Service) findCommonAncestorAndChain(ctx context.Context, oldHead storag
 		chainRev = append(chainRev, cur)
 
 		// fetch parent block by hash for continued walk
-		parent, err := s.rpc.GetBlockByHash(ctx, cur.ParentHash, true)
+		parent, err := s.rpcGetBlockByHash(ctx, cur.ParentHash, true)
 		if err != nil {
 			return 0, "", nil, fmt.Errorf("fetch parent block %s: %w", cur.ParentHash, err)
 		}
@@ -332,4 +343,96 @@ func (s *Service) findCommonAncestorAndChain(ctx context.Context, oldHead storag
 	}
 
 	return 0, "", nil, fmt.Errorf("reorg depth exceeded; could not find common ancestor (maxDepth=%d)", maxDepth)
+}
+
+func (s *Service) listenHeads(ctx context.Context) <-chan websocket.NewHead {
+	out := make(chan websocket.NewHead, 256)
+
+	var wg sync.WaitGroup
+	for _, c := range s.ws {
+		if c == nil {
+			continue
+		}
+		wg.Add(1)
+		go func(c websocket.WebsocketClient) {
+			defer wg.Done()
+			in := c.ListenNewHeads(ctx)
+			for {
+				select {
+				case h, ok := <-in:
+					if !ok {
+						return
+					}
+					select {
+					case out <- h:
+					case <-ctx.Done():
+						return
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		}(c)
+	}
+
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+
+	return out
+}
+
+func (s *Service) rpcBlockNumber(ctx context.Context) (uint64, error) {
+	var lastErr error
+	for _, c := range s.rpcs {
+		if c == nil {
+			continue
+		}
+		n, err := c.BlockNumber(ctx)
+		if err == nil {
+			return n, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = errors.New("no rpc clients configured")
+	}
+	return 0, lastErr
+}
+
+func (s *Service) rpcBatchGetBlocksByNumber(ctx context.Context, numbers []uint64, fullTx bool) ([]rpc.RawBlock, error) {
+	var lastErr error
+	for _, c := range s.rpcs {
+		if c == nil {
+			continue
+		}
+		blocks, err := c.BatchGetBlocksByNumber(ctx, numbers, fullTx)
+		if err == nil {
+			return blocks, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = errors.New("no rpc clients configured")
+	}
+	return nil, lastErr
+}
+
+func (s *Service) rpcGetBlockByHash(ctx context.Context, hash string, fullTx bool) (rpc.RawBlock, error) {
+	var lastErr error
+	for _, c := range s.rpcs {
+		if c == nil {
+			continue
+		}
+		b, err := c.GetBlockByHash(ctx, hash, fullTx)
+		if err == nil {
+			return b, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = errors.New("no rpc clients configured")
+	}
+	return rpc.RawBlock{}, lastErr
 }

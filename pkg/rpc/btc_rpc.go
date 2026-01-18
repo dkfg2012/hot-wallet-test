@@ -23,6 +23,15 @@ func NewBTCRPC(url string, timeout time.Duration) *BTCRPC {
 	}
 }
 
+func (c *BTCRPC) BlockNumber(ctx context.Context) (uint64, error) {
+	// Bitcoin Core: getblockcount -> current chain height
+	var height uint64
+	if err := c.hc.Call(ctx, "getblockcount", []interface{}{}, &height); err != nil {
+		return 0, err
+	}
+	return height, nil
+}
+
 type btcBlockMeta struct {
 	Hash              string          `json:"hash"`
 	Height            uint64          `json:"height"`

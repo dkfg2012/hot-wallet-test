@@ -56,7 +56,8 @@ func (q *RedisStreams) PushBlock(ctx context.Context, ev BlockEvent) (string, er
 		Values: fields,
 	}
 	if q.stream.MaxLen > 0 {
-		args.MaxLenApprox = q.stream.MaxLen
+		args.MaxLen = q.stream.MaxLen
+		args.Approx = true
 	}
 	return q.rdb.XAdd(ctx, args).Result()
 }
@@ -81,8 +82,8 @@ func (q *RedisStreams) PushReorg(ctx context.Context, ev ReorgEvent) (string, er
 		Values: fields,
 	}
 	if q.stream.MaxLen > 0 {
-		args.MaxLenApprox = q.stream.MaxLen
+		args.MaxLen = q.stream.MaxLen
+		args.Approx = true
 	}
 	return q.rdb.XAdd(ctx, args).Result()
 }
-
