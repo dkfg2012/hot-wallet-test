@@ -8,7 +8,6 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
-	"strconv"
 	"time"
 )
 
@@ -154,23 +153,4 @@ func (c *HTTPClient) BatchCall(ctx context.Context, method string, paramsList []
 		out = append(out, r.Result)
 	}
 	return out, nil
-}
-
-func (c *HTTPClient) BlockNumber(ctx context.Context) (uint64, error) {
-	var hexNum string
-	if err := c.Call(ctx, "eth_blockNumber", []interface{}{}, &hexNum); err != nil {
-		return 0, err
-	}
-	return parseHexUint64(hexNum)
-}
-
-func parseHexUint64(hexStr string) (uint64, error) {
-	// expects "0x..."
-	if len(hexStr) < 3 || hexStr[:2] != "0x" {
-		return 0, fmt.Errorf("invalid hex quantity: %q", hexStr)
-	}
-	if hexStr == "0x0" {
-		return 0, nil
-	}
-	return strconv.ParseUint(hexStr[2:], 16, 64)
 }

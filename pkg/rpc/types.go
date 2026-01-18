@@ -3,7 +3,13 @@ package rpc
 import (
 	"encoding/json"
 	"fmt"
+	"hot-wallet-test/pkg/util"
 )
+
+type RPCRequest struct {
+	Method string      `json:"method"`
+	Params interface{} `json:"params"`
+}
 
 type RawBlock struct {
 	Number     uint64
@@ -28,7 +34,7 @@ func DecodeRawBlock(raw json.RawMessage) (RawBlock, error) {
 	if m.Hash == "" || m.ParentHash == "" || m.Number == "" {
 		return RawBlock{}, fmt.Errorf("missing required block fields (hash/parentHash/number)")
 	}
-	n, err := parseHexUint64(m.Number)
+	n, err := util.ParseHexUint64(m.Number)
 	if err != nil {
 		return RawBlock{}, err
 	}

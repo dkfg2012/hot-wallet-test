@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"hot-wallet-test/pkg/config"
-	"hot-wallet-test/pkg/ethrpc"
 	"hot-wallet-test/pkg/indexer"
 	"hot-wallet-test/pkg/queue"
 	"hot-wallet-test/pkg/storage"
@@ -38,11 +37,11 @@ func main() {
 	}
 	defer redisQ.Close()
 
-	rpc := ethrpc.NewHTTP(cfg.EthRPC.HTTPURL, cfg.EthRPC.Timeout)
+	//rpc := ethrpc.NewHTTP(cfg.EthRPC.HTTPURL, cfg.EthRPC.Timeout)
 
 	svc := indexer.New(indexer.Deps{
 		Cfg:   cfg,
-		RPC:   rpc,
+		RPC:   nil,
 		Store: repo,
 		Queue: redisQ,
 	})

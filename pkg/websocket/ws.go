@@ -1,6 +1,8 @@
 package websocket
 
-import "context"
+import (
+	"context"
+)
 
 type NewHead struct {
 	Number     uint64
@@ -15,7 +17,7 @@ type subscribeReq struct {
 	Params  []interface{} `json:"params"`
 }
 
-type subscribeResp struct {
+type FirstSubscriptionResp struct {
 	JSONRPC string  `json:"jsonrpc"`
 	ID      int64   `json:"id"`
 	Result  string  `json:"result"`

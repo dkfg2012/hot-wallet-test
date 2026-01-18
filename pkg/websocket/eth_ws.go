@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hot-wallet-test/pkg/util"
 	"log"
 	"math/rand"
 	"net/http"
@@ -13,6 +14,19 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+type EthSubResp struct {
+	Jsonrpc string `json:"jsonrpc"`
+	Method  string `json:"method"`
+	Params  struct {
+		Subscription string `json:"subscription"`
+		Result       struct {
+			Number     string `json:"number"`
+			Hash       string `json:"hash"`
+			ParentHash string `json:"parentHash"`
+		} `json:"result"`
+	} `json:"params"`
+}
 
 var _ WebsocketClient = (*EthWebsocketClient)(nil)
 
@@ -25,18 +39,6 @@ func NewEthWebsocketClient(url string) *EthWebsocketClient {
 }
 
 func (e *rpcErr) Error() string { return fmt.Sprintf("rpc error %d: %s", e.Code, e.Message) }
-
-type subMsg struct {
-	Method string `json:"method"`
-	Params struct {
-		Subscription string `json:"subscription"`
-		Result       struct {
-			Number     string `json:"number"`
-			Hash       string `json:"hash"`
-			ParentHash string `json:"parentHash"`
-		} `json:"result"`
-	} `json:"params"`
-}
 
 // ListenNewHeads connects, subscribes to `newHeads`, and emits heads to the returned channel.
 // It will reconnect automatically until ctx is canceled.
@@ -65,7 +67,7 @@ func (c *EthWebsocketClient) ListenNewHeads(ctx context.Context) <-chan NewHead 
 func (c *EthWebsocketClient) listenOnce(ctx context.Context, out chan<- NewHead) error {
 	dialer := websocket.Dialer{
 		Proxy:            http.ProxyFromEnvironment,
-		HandshakeTimeout: 10 * time.Second,
+		HandshakeTimeout: 5 * time.Second,
 	}
 	conn, _, err := dialer.DialContext(ctx, c.url, nil)
 	if err != nil {
@@ -102,10 +104,9 @@ func (c *EthWebsocketClient) listenOnce(ctx context.Context, out chan<- NewHead)
 
 	subID := rand.Int63()
 	req := subscribeReq{
-		JSONRPC: "2.0",
-		ID:      subID,
-		Method:  "eth_subscribe",
-		Params:  []interface{}{"newHeads"},
+		ID:     subID,
+		Method: "eth_subscribe",
+		Params: []interface{}{"newHeads"},
 	}
 	writeMu.Lock()
 	if err := conn.WriteJSON(req); err != nil {
@@ -119,10 +120,10 @@ func (c *EthWebsocketClient) listenOnce(ctx context.Context, out chan<- NewHead)
 	if err != nil {
 		return err
 	}
-	var sr subscribeResp
-	if err := json.Unmarshal(msg, &sr); err == nil && sr.ID == subID {
-		if sr.Error != nil {
-			return sr.Error
+	var fsr FirstSubscriptionResp
+	if err := json.Unmarshal(msg, &fsr); err == nil && fsr.ID == subID {
+		if fsr.Error != nil {
+			return fsr.Error
 		}
 	} // if not parseable, we still continue; some nodes may interleave messages.
 
@@ -131,14 +132,14 @@ func (c *EthWebsocketClient) listenOnce(ctx context.Context, out chan<- NewHead)
 		if err != nil {
 			return err
 		}
-		var sm subMsg
+		var sm EthSubResp
 		if err := json.Unmarshal(msg, &sm); err != nil {
 			continue
 		}
 		if sm.Method != "eth_subscription" {
 			continue
 		}
-		n, err := parseHexUint64(sm.Params.Result.Number)
+		n, err := util.ParseHexUint64(sm.Params.Result.Number)
 		if err != nil {
 			continue
 		}
@@ -154,16 +155,4 @@ func (c *EthWebsocketClient) listenOnce(ctx context.Context, out chan<- NewHead)
 		}
 	}
 	return context.Canceled
-}
-
-func parseHexUint64(hexStr string) (uint64, error) {
-	if len(hexStr) < 3 || hexStr[:2] != "0x" {
-		return 0, fmt.Errorf("invalid hex quantity: %q", hexStr)
-	}
-	if hexStr == "0x0" {
-		return 0, nil
-	}
-	var out uint64
-	_, err := fmt.Sscanf(hexStr, "0x%x", &out)
-	return out, err
 }

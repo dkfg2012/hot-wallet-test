@@ -4,37 +4,36 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"time"
 )
 
 type EthRPC struct {
 	url     string
 	timeout time.Duration
-	hc      *http.Client
+	hc      *HTTPClient
 }
 
 var _ RPC = (*EthRPC)(nil)
 
 func NewEthRPC(url string, timeout time.Duration) *EthRPC {
-	return &EthRPC{url: url, timeout: timeout}
+	return &EthRPC{url: url, timeout: timeout, hc: NewHTTP(url, timeout)}
 }
 
 func (c *EthRPC) GetBlockByNumber(ctx context.Context, number uint64, fullTx bool) (RawBlock, error) {
 	tag := fmt.Sprintf("0x%x", number)
-	var raw json.RawMessage
-	if err := c.hc.Call(ctx, "eth_getBlockByNumber", []interface{}{tag, fullTx}, &raw); err != nil {
+	var resp json.RawMessage
+	if err := c.hc.Call(ctx, "eth_getBlockByNumber", []interface{}{tag, fullTx}, &resp); err != nil {
 		return RawBlock{}, err
 	}
-	return DecodeRawBlock(raw)
+	return DecodeRawBlock(resp)
 }
 
 func (c *EthRPC) GetBlockByHash(ctx context.Context, hash string, fullTx bool) (RawBlock, error) {
-	var raw json.RawMessage
-	if err := c.hc.Call(ctx, "eth_getBlockByHash", []interface{}{hash, fullTx}, &raw); err != nil {
+	var resp json.RawMessage
+	if err := c.hc.Call(ctx, "eth_getBlockByHash", []interface{}{hash, fullTx}, &resp); err != nil {
 		return RawBlock{}, err
 	}
-	return DecodeRawBlock(raw)
+	return DecodeRawBlock(resp)
 }
 
 func (c *EthRPC) BatchGetBlocksByNumber(ctx context.Context, numbers []uint64, fullTx bool) ([]RawBlock, error) {
